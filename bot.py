@@ -9,12 +9,10 @@ from telegram.request import HTTPXRequest
 from hypercorn.config import Config
 from hypercorn.asyncio import serve
 
-# Configure logging
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-# Web server for Render health checks
 quart_app = Quart(__name__)
 
 @quart_app.route('/')
@@ -59,7 +57,7 @@ async def main():
     if not BOT_TOKEN:
         raise ValueError("CRITICAL ERROR: 'BOT_TOKEN' environment variable is missing!")
 
-    # Add extended connection timeouts to prevent network drops
+    # Extended timeouts to prevent network drop crashes
     request_kwargs = HTTPXRequest(
         connect_timeout=30.0,
         read_timeout=30.0,
@@ -80,7 +78,12 @@ async def main():
     await app.start()
     await app.updater.start_polling(drop_pending_updates=True)
 
-    await serve(quart_app, config)
+    # Start web server for Render health checks
+    asyncio.create_task(serve(quart_app, config))
+    
+    # Keep the main loop running
+    while True:
+        await asyncio.sleep(3600)
 
 if __name__ == '__main__':
     asyncio.run(main())
