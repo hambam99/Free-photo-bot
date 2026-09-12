@@ -25,10 +25,10 @@ async def home():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         "🎨 **100% Free AI Media Generator**\n\n"
-        "Generate HD photos and AI videos with zero limits!\n\n"
+        "Generate HD photos and AI video loops with zero limits!\n\n"
         "**Available Commands:**\n"
         "📸 `/photo <prompt>` — Generate HD photo\n"
-        "🎬 `/video <prompt>` — Generate AI video clip\n\n"
+        "🎬 `/video <prompt>` — Generate AI video animation\n\n"
         "**Examples:**\n"
         "`/photo futuristic cyberpunk city at sunset, 8k render`\n"
         "`/video a glowing neon cat running through space`"
@@ -94,42 +94,41 @@ async def photo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def video_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_prompt = " ".join(context.args)
     if not user_prompt:
-        await update.message.reply_text("❌ Please provide a prompt!\nExample: `/video a glowing jellyfish swimming in deep ocean`", parse_mode='Markdown')
+        await update.message.reply_text("❌ Please provide a prompt!\nExample: `/video waterfall falling in green forest`", parse_mode='Markdown')
         return
 
-    status_msg = await update.message.reply_text("🎬 *Rendering your AI video (this may take up to 60s)...*", parse_mode='Markdown')
+    status_msg = await update.message.reply_text("🎬 *Rendering AI animation clip...*", parse_mode='Markdown')
 
     try:
         encoded_prompt = urllib.parse.quote(user_prompt)
         seed = random.randint(1000, 999999)
         
-        # Pollinations video rendering API
+        # Pollinations video rendering endpoint
         video_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=video&seed={seed}&nologo=true"
 
         headers = {"User-Agent": "Mozilla/5.0"}
 
-        # Extended 90-second client timeout specifically for video processing
         async with httpx.AsyncClient(timeout=90.0, follow_redirects=True) as client:
             response = await client.get(video_url, headers=headers)
             if response.status_code != 200:
-                raise Exception(f"Video service returned HTTP status {response.status_code}")
+                raise Exception(f"Video server status: {response.status_code}")
             
-            video_bytes = response.content
+            animation_bytes = response.content
 
-        video_file = io.BytesIO(video_bytes)
-        video_file.name = f"video_{seed}.mp4"
+        anim_file = io.BytesIO(animation_bytes)
+        anim_file.name = f"animation_{seed}.gif"
 
-        # Send playable MP4 video directly into Telegram chat
-        await update.message.reply_video(
-            video=video_file,
-            caption=f"🎬 *Video Prompt:* `{user_prompt}`",
+        # reply_animation handles seamless playback and auto-looping without requiring complex container headers
+        await update.message.reply_animation(
+            animation=anim_file,
+            caption=f"🎬 *Video Clip:* `{user_prompt}`",
             parse_mode='Markdown'
         )
         await status_msg.delete()
 
     except Exception as e:
         logging.error(f"Video generation error: {e}")
-        await status_msg.edit_text("❌ Video generation timed out or failed. Try a shorter, simpler video prompt!")
+        await status_msg.edit_text("❌ Video generation failed or timed out. Try a simpler prompt like `/video fire burning in fireplace`!")
 
 async def main():
     if not BOT_TOKEN:
