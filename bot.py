@@ -25,13 +25,13 @@ async def home():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         "🎨 **100% Free AI Media Generator**\n\n"
-        "Generate HD photos and AI video loops with zero limits!\n\n"
+        "Generate HD photos and real AI videos with zero limits!\n\n"
         "**Available Commands:**\n"
         "📸 `/photo <prompt>` — Generate HD photo\n"
-        "🎬 `/video <prompt>` — Generate AI video animation\n\n"
+        "🎬 `/video <prompt>` — Generate AI video clip\n\n"
         "**Examples:**\n"
         "`/photo futuristic cyberpunk city at sunset, 8k render`\n"
-        "`/video a glowing neon cat running through space`"
+        "`/video airplane flying fast through pink clouds`"
     )
     await update.message.reply_text(msg, parse_mode='Markdown')
 
@@ -94,41 +94,46 @@ async def photo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def video_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_prompt = " ".join(context.args)
     if not user_prompt:
-        await update.message.reply_text("❌ Please provide a prompt!\nExample: `/video waterfall falling in green forest`", parse_mode='Markdown')
+        await update.message.reply_text("❌ Please provide a prompt!\nExample: `/video airplane flying through clouds`", parse_mode='Markdown')
         return
 
-    status_msg = await update.message.reply_text("🎬 *Rendering AI animation clip...*", parse_mode='Markdown')
+    status_msg = await update.message.reply_text("🎬 *Rendering real motion video (takes 30-60s)...*", parse_mode='Markdown')
 
     try:
-        encoded_prompt = urllib.parse.quote(user_prompt)
+        encoded_prompt = urllib.parse.quote(f"{user_prompt}, smooth camera movement, cinematic motion, video")
         seed = random.randint(1000, 999999)
         
-        # Pollinations video rendering endpoint
-        video_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=video&seed={seed}&nologo=true"
+        # Native direct video endpoint
+        video_url = f"https://gen.pollinations.ai/video/{encoded_prompt}?seed={seed}"
 
-        headers = {"User-Agent": "Mozilla/5.0"}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Accept": "video/mp4,video/*;q=0.9,*/*;q=0.8"
+        }
 
-        async with httpx.AsyncClient(timeout=90.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
             response = await client.get(video_url, headers=headers)
-            if response.status_code != 200:
-                raise Exception(f"Video server status: {response.status_code}")
+            if response.status_code != 200 or len(response.content) < 10000:
+                # Fallback video endpoint
+                alt_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=video&seed={seed}&nologo=true"
+                response = await client.get(alt_url, headers=headers)
             
-            animation_bytes = response.content
+            video_bytes = response.content
 
-        anim_file = io.BytesIO(animation_bytes)
-        anim_file.name = f"animation_{seed}.gif"
+        vid_file = io.BytesIO(video_bytes)
+        vid_file.name = f"video_{seed}.mp4"
 
-        # reply_animation handles seamless playback and auto-looping without requiring complex container headers
-        await update.message.reply_animation(
-            animation=anim_file,
-            caption=f"🎬 *Video Clip:* `{user_prompt}`",
-            parse_mode='Markdown'
+        await update.message.reply_video(
+            video=vid_file,
+            caption=f"🎬 *AI Video:* `{user_prompt}`",
+            parse_mode='Markdown',
+            supports_streaming=True
         )
         await status_msg.delete()
 
     except Exception as e:
         logging.error(f"Video generation error: {e}")
-        await status_msg.edit_text("❌ Video generation failed or timed out. Try a simpler prompt like `/video fire burning in fireplace`!")
+        await status_msg.edit_text("❌ Video generation timed out. Free AI video servers are currently loaded, please try again in a few moments!")
 
 async def main():
     if not BOT_TOKEN:
@@ -136,8 +141,8 @@ async def main():
 
     request_kwargs = HTTPXRequest(
         connect_timeout=30.0,
-        read_timeout=90.0,
-        write_timeout=90.0,
+        read_timeout=120.0,
+        write_timeout=120.0,
         pool_timeout=30.0
     )
 
