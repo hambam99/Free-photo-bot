@@ -2,3 +2,4 @@ python-telegram-bot
 httpx
 quart
 hypercorn
+Pillow
