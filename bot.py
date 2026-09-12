@@ -21,12 +21,12 @@ async def home():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
-        "🎨 **100% Free AI Photo Generator**\n\n"
-        "Generate images with no daily limits!\n\n"
+        "🎨 **100% Free High-Res AI Photo Generator**\n\n"
+        "Generate HD images with no daily limits!\n\n"
         "**Usage:**\n"
         "`/photo <your prompt>`\n\n"
         "**Example:**\n"
-        "`/photo a futuristic city at sunset, highly detailed, 8k render`"
+        "`/photo a majestic lion wearing golden armor, 8k resolution, photorealistic, highly detailed`"
     )
     await update.message.reply_text(msg, parse_mode='Markdown')
 
@@ -36,15 +36,21 @@ async def photo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Please provide a prompt!\nExample: `/photo a cute astronaut cat on the moon`", parse_mode='Markdown')
         return
 
-    status_msg = await update.message.reply_text("🎨 *Generating your AI image...*", parse_mode='Markdown')
+    status_msg = await update.message.reply_text("🎨 *Generating your high-resolution AI image...*", parse_mode='Markdown')
 
     try:
+        # Encode prompt safely for HTTP URL
         encoded_prompt = urllib.parse.quote(prompt)
-        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true"
+        
+        # High-definition parameter configuration (1280x1280 resolution with enhance enabled)
+        image_url = (
+            f"https://image.pollinations.ai/prompt/{encoded_prompt}"
+            f"?width=1280&height=1280&model=flux&nologo=true&enhance=true"
+        )
 
         await update.message.reply_photo(
             photo=image_url,
-            caption=f"✨ *Prompt:* `{prompt}`",
+            caption=f"✨ *Prompt:* `{prompt}`\n📐 *Resolution:* High Definition (FLUX)",
             parse_mode='Markdown'
         )
         await status_msg.delete()
@@ -57,7 +63,6 @@ async def main():
     if not BOT_TOKEN:
         raise ValueError("CRITICAL ERROR: 'BOT_TOKEN' environment variable is missing!")
 
-    # Extended timeouts to prevent network drop crashes
     request_kwargs = HTTPXRequest(
         connect_timeout=30.0,
         read_timeout=30.0,
@@ -78,10 +83,8 @@ async def main():
     await app.start()
     await app.updater.start_polling(drop_pending_updates=True)
 
-    # Start web server for Render health checks
     asyncio.create_task(serve(quart_app, config))
     
-    # Keep the main loop running
     while True:
         await asyncio.sleep(3600)
 
