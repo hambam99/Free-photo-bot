@@ -5,6 +5,7 @@ import asyncio
 from quart import Quart
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.request import HTTPXRequest
 from hypercorn.config import Config
 from hypercorn.asyncio import serve
 
@@ -23,7 +24,7 @@ async def home():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         "🎨 **100% Free AI Photo Generator**\n\n"
-        "Generate images with no daily limits or API keys required!\n\n"
+        "Generate images with no daily limits!\n\n"
         "**Usage:**\n"
         "`/photo <your prompt>`\n\n"
         "**Example:**\n"
@@ -40,13 +41,9 @@ async def photo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_msg = await update.message.reply_text("🎨 *Generating your AI image...*", parse_mode='Markdown')
 
     try:
-        # Encode prompt safely for HTTP URL
         encoded_prompt = urllib.parse.quote(prompt)
-        
-        # Free FLUX model endpoint via Pollinations.ai
         image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true"
 
-        # Send image to Telegram
         await update.message.reply_photo(
             photo=image_url,
             caption=f"✨ *Prompt:* `{prompt}`",
@@ -62,13 +59,19 @@ async def main():
     if not BOT_TOKEN:
         raise ValueError("CRITICAL ERROR: 'BOT_TOKEN' environment variable is missing!")
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    # Add extended connection timeouts to prevent network drops
+    request_kwargs = HTTPXRequest(
+        connect_timeout=30.0,
+        read_timeout=30.0,
+        write_timeout=30.0,
+        pool_timeout=30.0
+    )
+
+    app = ApplicationBuilder().token(BOT_TOKEN).request(request_kwargs).build()
     
-    # Register command handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("photo", photo_command))
 
-    # Port configuration for Render
     config = Config()
     port = int(os.environ.get("PORT", 10000))
     config.bind = [f"0.0.0.0:{port}"]
@@ -77,9 +80,7 @@ async def main():
     await app.start()
     await app.updater.start_polling(drop_pending_updates=True)
 
-    # Run web server alongside bot engine
     await serve(quart_app, config)
 
 if __name__ == '__main__':
     asyncio.run(main())
-
