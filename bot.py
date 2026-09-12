@@ -25,67 +25,72 @@ async def home():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         "🎨 **100% Free HD AI Photo Generator**\n\n"
-        "Generate full quality images with no daily limits!\n\n"
+        "Generate maximum quality images with no API key required!\n\n"
         "**Usage:**\n"
         "`/photo <your prompt>`\n\n"
         "**Example:**\n"
-        "`/photo futuristic cyberpunk city, photorealistic, 8k resolution`"
+        "`/photo futuristic cyberpunk city at sunset, cinematic lighting, 8k resolution, photorealistic`"
     )
     await update.message.reply_text(msg, parse_mode='Markdown')
 
 async def photo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    prompt = " ".join(context.args)
-    if not prompt:
-        await update.message.reply_text("❌ Please provide a prompt!\nExample: `/photo a cute astronaut cat`", parse_mode='Markdown')
+    user_prompt = " ".join(context.args)
+    if not user_prompt:
+        await update.message.reply_text("❌ Please provide a prompt!\nExample: `/photo a cute astronaut cat on Mars`", parse_mode='Markdown')
         return
 
-    status_msg = await update.message.reply_text("🎨 *Rendering high-detail image...*", parse_mode='Markdown')
+    status_msg = await update.message.reply_text("🎨 *Rendering ultra-high-resolution image...*", parse_mode='Markdown')
 
     try:
-        # Append quality tags to force detail rendering
-        enhanced_prompt = f"{prompt}, 8k resolution, highly detailed, photorealistic, cinematic lighting"
-        encoded_prompt = urllib.parse.quote(enhanced_prompt)
+        # Append quality keywords for detailed generation
+        full_prompt = f"{user_prompt}, 8k resolution, masterpiece, highly detailed, photorealistic, cinematic lighting"
+        encoded_prompt = urllib.parse.quote(full_prompt)
         
-        # Add a random seed to prevent cached low-res returns
-        seed = random.randint(1, 99999999)
+        seed = random.randint(10000, 999999)
         
-        image_url = (
-            f"https://pollinations.ai/p/{encoded_prompt}"
-            f"?width=1920&height=1080&seed={seed}&model=flux&nologo=true"
-        )
+        # High-definition FLUX rendering endpoint
+        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=2048&height=2048&seed={seed}&model=flux&nologo=true"
 
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-        }
-
-        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-            response = await client.get(image_url, headers=headers)
+        async with httpx.AsyncClient(timeout=90.0, follow_redirects=True) as client:
+            response = await client.get(image_url)
             if response.status_code != 200:
-                raise Exception("Failed to fetch rendered image.")
+                raise Exception("Image generation service failed to return an image.")
             
-            image_bytes = io.BytesIO(response.content)
-            image_bytes.name = "hd_image.png"
+            image_data = io.BytesIO(response.content)
+            image_data.name = "high_res_image.png"
 
-        # Send as document to prevent Telegram photo downscaling
-        await update.message.reply_document(
-            document=image_bytes,
-            filename="hd_image.png",
-            caption=f"✨ *Prompt:* `{prompt}`",
+        # Send both photo view AND high-res uncompressed file
+        await update.message.reply_photo(
+            photo=image_data,
+            caption=f"✨ *Prompt:* `{user_prompt}`",
             parse_mode='Markdown'
         )
+        
+        image_data.seek(0)
+        
+        await update.message.reply_document(
+            document=image_data,
+            filename=f"hd_render_{seed}.png",
+            caption="📁 *Full Original Uncompressed Quality (2048x2048)*",
+            parse_mode='Markdown'
+        )
+        
         await status_msg.delete()
 
     except Exception as e:
         logging.error(f"Generation error: {e}")
-        await status_msg.edit_text("❌ Failed to generate photo. Please try again with a different prompt.")
+        await status_msg.edit_text("❌ Failed to generate photo. Please try again with a descriptive prompt.")
 
 async def main():
     if not BOT_TOKEN:
         raise ValueError("CRITICAL ERROR: 'BOT_TOKEN' environment variable is missing!")
 
+    # Initial delay to clear lingering connection instances on Render restart
+    await asyncio.sleep(3)
+
     request_kwargs = HTTPXRequest(
         connect_timeout=30.0,
-        read_timeout=30.0,
+        read_timeout=60.0,
         write_timeout=60.0,
         pool_timeout=30.0
     )
