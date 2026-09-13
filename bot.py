@@ -59,13 +59,12 @@ if not BotConfig.BOT_TOKEN:
     sys.exit(1)
 
 # ==============================================================================
-# 2. SESSION CONTEXT MEMORY MANAGER (FOR EDITING MEDIA)
+# 2. SESSION CONTEXT MEMORY MANAGER (FOR INTERACTIVE EDITING)
 # ==============================================================================
 
 class SessionManager:
     """Tracks active user sessions to enable prompt-based photo & video editing."""
     def __init__(self):
-        # Format: { chat_id: { "type": "photo"|"video", "prompt": str, "image_bytes": bytes, "url": str } }
         self.sessions: Dict[int, Dict[str, Any]] = {}
 
     def set_session(self, chat_id: int, media_type: str, prompt: str, image_bytes: Optional[bytes] = None, url: Optional[str] = None):
@@ -108,7 +107,7 @@ async def ping():
     return "PONG", 200
 
 # ==============================================================================
-# 4. PROMPT & PARSING UTILITIES
+# 4. PROMPT ENGINEERING & UTILITY FUNCTIONS
 # ==============================================================================
 
 def parse_prompt_flags(raw_prompt: str) -> Tuple[str, int, int, str]:
@@ -133,28 +132,38 @@ def parse_prompt_flags(raw_prompt: str) -> Tuple[str, int, int, str]:
     return clean_prompt, width, height, ar_key
 
 def enhance_prompt(prompt: str, mode: str = "photo") -> str:
-    """Appends quality parameters to ensure maximum visual detail."""
+    """Constructs natural descriptive prompts tailored for FLUX.1 & modern AI models."""
     if mode == "photo":
-        quality_boost = "masterpiece, ultra detailed, 8k resolution, professional photography, realistic lighting, sharp focus"
+        return (
+            f"A high-speed action photograph of {prompt}. "
+            f"Sharp focus, detailed natural texture, dynamic lighting, "
+            f"cinematic shot, 35mm lens, f/1.8 aperture, vivid environment"
+        )
     else:
-        quality_boost = "masterpiece, 8k resolution video, cinematic motion, smooth fluidity, photorealistic, 60fps"
-    return f"{prompt}, {quality_boost}"
+        return (
+            f"Cinematic video frame of {prompt}, fluid motion, high frame rate, "
+            f"photorealistic lighting, 4k resolution, rich detail"
+        )
 
 # ==============================================================================
 # 5. HIGH-RESOLUTION PHOTO GENERATION & EDITING PIPELINE
 # ==============================================================================
 
 async def generate_photo_bytes(prompt: str, width: int, height: int, seed: int) -> Tuple[Optional[bytes], str]:
-    """Renders high-definition photos via FLUX and SDXL pipelines."""
+    """Renders high-definition photos via FLUX.1 with clean output flags."""
     enhanced = enhance_prompt(prompt, "photo")
     encoded_prompt = urllib.parse.quote(enhanced)
     
     endpoints = [
-        ("FLUX.1 HD", f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={width}&height={height}&seed={seed}&model=flux&nologo=true&enhance=true"),
-        ("SDXL Turbo", f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={width}&height={height}&seed={seed}&model=turbo&nologo=true"),
+        ("FLUX.1 HD Engine", f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={width}&height={height}&seed={seed}&model=flux&nologo=true&private=true&enhance=false"),
+        ("SDXL Realism Engine", f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={width}&height={height}&seed={seed}&model=sdxl&nologo=true&private=true&enhance=false"),
     ]
 
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+    }
+    
     if BotConfig.POLLINATIONS_API_KEY:
         headers["Authorization"] = f"Bearer {BotConfig.POLLINATIONS_API_KEY}"
 
@@ -163,7 +172,7 @@ async def generate_photo_bytes(prompt: str, width: int, height: int, seed: int) 
             try:
                 logger.info(f"Rendering image with {model_name}...")
                 response = await client.get(url, headers=headers)
-                if response.status_code == 200 and len(response.content) > 10000:
+                if response.status_code == 200 and len(response.content) > 15000:
                     return response.content, model_name
             except Exception as e:
                 logger.warning(f"{model_name} render failed: {e}")
@@ -173,30 +182,29 @@ async def generate_photo_bytes(prompt: str, width: int, height: int, seed: int) 
 async def edit_photo_bytes(original_image_bytes: bytes, edit_instruction: str, seed: int) -> Tuple[Optional[bytes], str]:
     """Edits an existing image based on user text instructions (Img2Img)."""
     try:
-        # Base64 encode original image for Img2Img translation
         b64_img = base64.b64encode(original_image_bytes).decode('utf-8')
         data_url = f"data:image/png;base64,{b64_img}"
         
         enhanced_prompt = enhance_prompt(edit_instruction, "photo")
         encoded_prompt = urllib.parse.quote(enhanced_prompt)
         
-        # Pollinations Img2Img endpoint passing reference context
-        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?seed={seed}&model=flux&nologo=true"
+        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?seed={seed}&model=flux&nologo=true&private=true"
         
-        headers = {"User-Agent": "Mozilla/5.0"}
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Content-Type": "application/json"
+        }
         if BotConfig.POLLINATIONS_API_KEY:
             headers["Authorization"] = f"Bearer {BotConfig.POLLINATIONS_API_KEY}"
 
         async with httpx.AsyncClient(timeout=BotConfig.HTTP_TIMEOUT, follow_redirects=True) as client:
-            # POST payload with reference image for img2img modifier
             response = await client.post(url, json={"image": data_url}, headers=headers)
-            if response.status_code == 200 and len(response.content) > 10000:
+            if response.status_code == 200 and len(response.content) > 15000:
                 return response.content, "FLUX Img2Img Editor"
             
-            # Fallback to GET stream with modifier prompt
-            fallback_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}%20(modifying%20previous%20image)?seed={seed}&model=flux&nologo=true"
+            fallback_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?seed={seed}&model=flux&nologo=true&private=true"
             res2 = await client.get(fallback_url, headers=headers)
-            if res2.status_code == 200 and len(res2.content) > 10000:
+            if res2.status_code == 200 and len(res2.content) > 15000:
                 return res2.content, "FLUX AI Refiner"
                 
     except Exception as e:
@@ -205,25 +213,22 @@ async def edit_photo_bytes(original_image_bytes: bytes, edit_instruction: str, s
     return None, "Edit Failed"
 
 # ==============================================================================
-# 6. HIGH-DEFINITION VIDEO GENERATION & EDITING PIPELINE
+# 6. HIGH-DEFINITION VIDEO GENERATION PIPELINE
 # ==============================================================================
 
-async def generate_video_file(prompt: str, seed: int, reference_image_bytes: Optional[bytes] = None) -> Tuple[Optional[io.BytesIO], str]:
+async def generate_video_file(prompt: str, seed: int) -> Tuple[Optional[io.BytesIO], str]:
     """Generates real HD AI video clips using Replicate or SVD video pipelines."""
     enhanced_prompt = enhance_prompt(prompt, "video")
     
-    # Tier 1: Replicate Stable Video Diffusion / CogVideoX (If API Token provided)
     if BotConfig.REPLICATE_API_TOKEN:
         try:
             logger.info("Initiating HD Video render via Replicate GPU...")
             import replicate
             
             def call_replicate():
-                # Stable Video Diffusion / Minimax Video model
                 return replicate.run(
                     "stability-ai/stable-video-diffusion:3f0457e4619da25d21e6178ddd7ed6a29223f0b508f0d1e2712d7a96d70d222b",
                     input={
-                        "input_image": reference_image_bytes if reference_image_bytes else None,
                         "motion_bucket_id": 127,
                         "fps": 24,
                         "cond_aug": 0.02
@@ -242,19 +247,18 @@ async def generate_video_file(prompt: str, seed: int, reference_image_bytes: Opt
         except Exception as e:
             logger.error(f"Replicate video render failed: {e}")
 
-    # Tier 2: Dedicated Video Render Stream API
     try:
         encoded = urllib.parse.quote(enhanced_prompt)
-        video_url = f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1024&height=576&seed={seed}&nologo=true"
+        video_url = f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1024&height=576&seed={seed}&nologo=true&private=true"
         
         async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
             res = await client.get(video_url)
-            if res.status_code == 200 and len(res.content) > 10000:
+            if res.status_code == 200 and len(res.content) > 15000:
                 buf = io.BytesIO(res.content)
                 buf.name = f"video_{seed}.mp4"
                 return buf, "Pollinations Video Engine"
     except Exception as e:
-        logger.error(f"Tier 2 video generation error: {e}")
+        logger.error(f"Video fallback generation error: {e}")
 
     return None, "Failed"
 
@@ -271,7 +275,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎬 **Generate Videos:**\n"
         "• `/video <prompt>` — Real HD AI Motion Video\n\n"
         "✏️ **Interactive Media Editing:**\n"
-        "• Simply **type a message** after generating any image or video, and the bot will edit it based on your instructions!\n\n"
+        "• Simply **type a message** after generating any image or video to edit it based on your instructions!\n\n"
         "⚙️ **System Diagnostics:** `/status`"
     )
     await update.message.reply_text(welcome_text, parse_mode=ParseMode.MARKDOWN)
@@ -284,7 +288,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⚙️ **Studio System Diagnostics**\n"
         "━━━━━━━━━━━━━━━━━━━\n"
         f"⏱️ **Uptime:** `{uptime}s`\n"
-        f"🖼️ **Photo Engine:** `FLUX.1-dev / SDXL HD`\n"
+        f"🖼️ **Photo Engine:** `FLUX.1 HD Engine`\n"
         f"🎥 **Video Engine:** {replicate_status}\n"
         f"✏️ **Interactive Editing:** `Active (Img2Img Engine Loaded)`"
     )
@@ -293,7 +297,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def photo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw_args = " ".join(context.args)
     if not raw_args:
-        await update.message.reply_text("❌ **Specify a prompt!**\nExample: `/photo a futuristic cyberpunk city --ar 16:9`", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("❌ **Specify a prompt!**\nExample: `/photo white cat dancing in rain --ar 16:9`", parse_mode=ParseMode.MARKDOWN)
         return
 
     chat_id = update.effective_chat.id
@@ -306,7 +310,6 @@ async def photo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     image_bytes, engine_used = await generate_photo_bytes(prompt, width, height, seed)
 
     if image_bytes:
-        # Save active session context for future edits
         session_mgr.set_session(chat_id, "photo", prompt, image_bytes=image_bytes)
 
         keyboard = InlineKeyboardMarkup([
@@ -315,7 +318,7 @@ async def photo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_photo(
             photo=image_bytes,
-            caption=f"✨ *Prompt:* `{prompt}`\n⚙️ *Engine:* `{engine_used}` | `{ar_key}`\n\n💡 *Tip: Reply or send any text to edit this photo!*",
+            caption=f"✨ *Prompt:* `{prompt}`\n⚙️ *Engine:* `{engine_used}` | `{ar_key}`\n\n💡 *Tip: Reply or type any text to edit this image!*",
             reply_markup=keyboard,
             parse_mode=ParseMode.MARKDOWN
         )
@@ -326,7 +329,7 @@ async def photo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def video_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw_prompt = " ".join(context.args)
     if not raw_prompt:
-        await update.message.reply_text("❌ **Specify a prompt!**\nExample: `/video astronaut walking on red glowing planet`", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("❌ **Specify a prompt!**\nExample: `/video white cat dancing happily in rain puddles`", parse_mode=ParseMode.MARKDOWN)
         return
 
     chat_id = update.effective_chat.id
@@ -339,12 +342,11 @@ async def video_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     video_buf, engine_name = await generate_video_file(clean_prompt, seed)
 
     if video_buf:
-        # Save session context
         session_mgr.set_session(chat_id, "video", clean_prompt)
 
         await update.message.reply_video(
             video=video_buf,
-            caption=f"🎬 *AI Video:* `{clean_prompt}`\n⚙️ *Engine:* `{engine_name}`\n\n💡 *Tip: Type a new description below to alter this video!*",
+            caption=f"🎬 *AI Video:* `{clean_prompt}`\n⚙️ *Engine:* `{engine_name}`\n\n💡 *Tip: Type a new text description below to alter this video!*",
             parse_mode=ParseMode.MARKDOWN,
             supports_streaming=True
         )
@@ -353,7 +355,7 @@ async def video_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text("❌ Video generation timed out. Try a simpler prompt or retry in 1 minute.")
 
 # ==============================================================================
-# 8. INTERACTIVE EDITING TEXT HANDLER
+# 8. INTERACTIVE TEXT-TO-EDIT HANDLER
 # ==============================================================================
 
 async def handle_text_edits(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -363,10 +365,9 @@ async def handle_text_edits(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     session = session_mgr.get_session(chat_id)
 
-    # If user has no active session, prompt them on how to start
     if not session:
         await update.message.reply_text(
-            "💡 **No active media to edit.**\n"
+            "💡 **No active media session found.**\n"
             "Generate a photo or video first using `/photo` or `/video`, then send text to edit it!",
             parse_mode=ParseMode.MARKDOWN
         )
@@ -425,7 +426,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     if query.data == "prompt_edit_hint":
-        await query.message.reply_text("✍️ **Just type what you want to change in chat!**\nExample: *\"Add retro neon lights and make it rain\"*")
+        await query.message.reply_text("✍️ **Just type what you want to change in chat!**\nExample: *\"Make the cat wear a yellow rain hat\"*")
 
 # ==============================================================================
 # 9. GLOBAL ERROR HANDLER & MAIN EXECUTION
@@ -451,7 +452,7 @@ async def main():
         .build()
     )
 
-    # Handlers
+    # Command & Message Handlers
     telegram_app.add_handler(CommandHandler("start", start_command))
     telegram_app.add_handler(CommandHandler("help", start_command))
     telegram_app.add_handler(CommandHandler("status", status_command))
@@ -459,7 +460,7 @@ async def main():
     telegram_app.add_handler(CommandHandler("video", video_command))
     telegram_app.add_handler(CallbackQueryHandler(callback_handler))
     
-    # Catch-all text handler for editing generated media
+    # Catch-all text handler for media edits
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_edits))
     
     telegram_app.add_error_handler(error_handler)
@@ -470,7 +471,7 @@ async def main():
     await telegram_app.updater.start_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
     logger.info("Telegram Bot active & listening!")
 
-    # Configure Web Server for hosting (e.g. Render)
+    # Configure Web Server for Render hosting
     hypercorn_config = HyperConfig()
     hypercorn_config.bind = [f"0.0.0.0:{BotConfig.PORT}"]
     hypercorn_config.shutdown_timeout = 5.0
