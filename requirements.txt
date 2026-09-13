@@ -1,7 +1,6 @@
-python-telegram-bot>=20.0
-httpx>=0.24.0
-quart>=0.19.0
-hypercorn>=0.14.0
-Pillow>=10.0.0
-replicate>=0.22.0
-
+python-telegram-bot[job-queue]==20.7
+httpx==0.26.0
+quart==0.19.4
+hypercorn==0.16.0
+Pillow==10.2.0
+replicate==0.23.1
